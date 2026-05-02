@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IA Server | LLM Manager</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header>
+        <h1>IA SERVER</h1>
+        <div id="connection-status">
+            <span class="status-badge">API Online (Python 2.7.17)</span>
+        </div>
+    </header>
+
+    <div class="container">
+        <section class="model-puller">
+            <h2>Descargar Modelos</h2>
+            <p>Introduce el nombre del modelo de Ollama (ej: llama3, mistral, deepseek-llm).</p>
+            <div class="input-group">
+                <input type="text" id="model-name" placeholder="Nombre del modelo...">
+                <button class="btn" onclick="pullModel()">Descargar</button>
+            </div>
+            
+            <div id="pull-progress-container" class="progress-container">
+                <div class="progress-label">
+                    <span id="pull-progress-text">Descargando...</span>
+                    <span id="pull-progress-percent">0%</span>
+                </div>
+                <div class="progress-bar-bg">
+                    <div id="pull-progress-fill" class="progress-bar-fill"></div>
+                </div>
+            </div>
+
+            <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                <button class="btn btn-outline" onclick="quickPull('deepseek-llm')">Pull DeepSeek</button>
+                <button class="btn btn-outline" onclick="quickPull('deepseek-coder')">Pull DeepSeek Coder</button>
+                <button class="btn btn-outline" onclick="quickPull('llama3')">Pull Llama3</button>
+            </div>
+        </section>
+
+        <section class="chat-section">
+            <div class="chat-header">
+                <h2>Chat con IA</h2>
+                <select id="chat-model-select" class="model-select">
+                    <option value="">Selecciona un modelo...</option>
+                </select>
+            </div>
+            <div id="chat-messages" class="chat-messages">
+                <div class="message message-bot">
+                    ¡Hola! Selecciona un modelo y escribe algo para empezar a chatear. Si el modelo es multimodal (como LLaVA o Moondream), ¡puedes enviarme imágenes!
+                </div>
+            </div>
+            <div id="chat-image-preview" class="image-preview-container">
+                <div class="image-preview">
+                    <img id="preview-img" src="" alt="Vista previa">
+                    <div class="remove-image" onclick="clearImage()">×</div>
+                </div>
+            </div>
+            <div class="chat-input-area">
+                <input type="file" id="chat-image-input" accept="image/*" style="display:none" onchange="handleImageSelect(this)">
+                <button class="btn-icon" onclick="document.getElementById('chat-image-input').click()" title="Adjuntar imagen">
+                    📷
+                </button>
+                <input type="text" id="chat-input" placeholder="Escribe tu mensaje aquí..." onkeypress="if(event.key === 'Enter') sendChatMessage()">
+                <button class="btn" onclick="sendChatMessage()">Enviar</button>
+            </div>
+        </section>
+
+        <h2>Modelos Instalados</h2>
+        <div id="model-grid" class="grid">
+            <!-- Models will be loaded here -->
+            <div class="card">
+                <p>Cargando modelos...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let chatHistory = [];
+        let currentBase64Image = null;
+
+        function handleImageSelect(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                currentBase64Image = e.target.result.split(',')[1];
+                document.getElementById('preview-img').src = e.target.result;
+                document.getElementById('chat-image-preview').style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function clearImage() {
+            currentBase64Image = null;
+            document.getElementById('chat-image-input').value = '';
+            document.getElementById('chat-image-preview').style.display = 'none';
+        }
+
+        async function fetchModels() {
+            try {
+                const res = await fetch('/v1/models');
+                const data = await res.json();
+                const grid = document.getElementById('model-grid');
+                const chatSelect = document.getElementById('chat-model-select');
+                
+                grid.innerHTML = '';
+                chatSelect.innerHTML = '<option value="">Selecciona un modelo...</option>';
+
+                if (data.models && data.models.length > 0) {
+                    data.models.forEach(model => {
+                        const isDeepSeek = model.name.toLowerCase().includes('deepseek');
+                        const card = document.createElement('div');
+                        card.className = 'card';
+                        card.innerHTML = `
+                            <span class="status-badge">Ready</span>
+                            <h3 class="${isDeepSeek ? 'deepseek-branding' : ''}">${model.name}</h3>
+                            <p>Tamaño: ${(model.size / (1024*1024*1024)).toFixed(2)} GB</p>
+                            <p>Modificado: ${new Date(model.modified_at).toLocaleDateString()}</p>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <button class="btn" onclick="selectModelForChat('${model.name}')">Chat</button>
+                                <button class="btn btn-outline" onclick="deleteModel('${model.name}')">Eliminar</button>
+                            </div>
+                        `;
+                        grid.appendChild(card);
+
+                        const option = document.createElement('option');
+                        option.value = model.name;
+                        option.textContent = model.name;
+                        chatSelect.appendChild(option);
+                    });
+                } else {
+                    grid.innerHTML = '<p>No hay modelos instalados. ¡Descarga uno arriba!</p>';
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        function selectModelForChat(name) {
+            document.getElementById('chat-model-select').value = name;
+            document.getElementById('chat-input').focus();
+            document.querySelector('.chat-section').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function sendChatMessage() {
+            const input = document.getElementById('chat-input');
+            const modelSelect = document.getElementById('chat-model-select');
+            const message = input.value.trim();
+            const model = modelSelect.value;
+
+            if (!message || !model) {
+                if (!model) alert('Por favor, selecciona un modelo primero.');
+                return;
+            }
+
+            // Create message object
+            const messageObj = { role: 'user', content: message };
+            if (currentBase64Image) {
+                messageObj.images = [currentBase64Image];
+            }
+
+            // Add user message to UI
+            addMessageToChat('user', message, currentBase64Image);
+            
+            // Clear input and image
+            input.value = '';
+            const tempImage = currentBase64Image;
+            clearImage();
+
+            // Add to history
+            chatHistory.push(messageObj);
+
+            // Add typing indicator
+            const typingId = addMessageToChat('bot', '...', null, true);
+
+            try {
+                const res = await fetch('/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        model: model,
+                        messages: chatHistory,
+                        stream: false
+                    })
+                });
+
+                const data = await res.json();
+                const botMessage = data.choices[0].message.content;
+                
+                document.getElementById(typingId).remove();
+                addMessageToChat('bot', botMessage);
+                
+                chatHistory.push({role: 'assistant', content: botMessage});
+
+            } catch (err) {
+                console.error(err);
+                const typingDiv = document.getElementById(typingId);
+                if (typingDiv) typingDiv.innerHTML = 'Error al obtener respuesta de la IA.';
+            }
+        }
+
+        function addMessageToChat(role, content, base64Image = null, isTyping = false) {
+            const container = document.getElementById('chat-messages');
+            const msgDiv = document.createElement('div');
+            const id = 'msg-' + Date.now();
+            msgDiv.id = id;
+            msgDiv.className = `message message-${role}`;
+            
+            if (base64Image) {
+                const img = document.createElement('img');
+                img.src = `data:image/jpeg;base64,${base64Image}`;
+                img.className = 'chat-bubble-image';
+                msgDiv.appendChild(img);
+            }
+
+            const textSpan = document.createElement('span');
+            textSpan.textContent = content;
+            msgDiv.appendChild(textSpan);
+
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;
+            return id;
+        }
+
+        async function pullModel() {
+            const nameInput = document.getElementById('model-name');
+            const name = nameInput.value.trim();
+            if (!name) return;
+            
+            const btn = event.target;
+            const originalText = btn.innerText;
+            const progressContainer = document.getElementById('pull-progress-container');
+            const progressFill = document.getElementById('pull-progress-fill');
+            const progressText = document.getElementById('pull-progress-text');
+            const progressPercent = document.getElementById('pull-progress-percent');
+
+            btn.innerText = 'Iniciando...';
+            btn.disabled = true;
+            progressContainer.style.display = 'block';
+            progressFill.style.width = '0%';
+            progressPercent.innerText = '0%';
+            progressText.innerText = 'Preparando descarga...';
+
+            try {
+                const response = await fetch('/v1/models/pull', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: name})
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (!line.trim()) continue;
+                        try {
+                            const data = JSON.parse(line);
+                            if (data.status) {
+                                // Translate or format status
+                                let statusMsg = data.status;
+                                if (statusMsg === 'pulling manifest') statusMsg = 'Obteniendo manifiesto...';
+                                if (statusMsg === 'downloading') statusMsg = 'Descargando...';
+                                if (statusMsg === 'verifying sha256') statusMsg = 'Verificando...';
+                                if (statusMsg === 'writing manifest') statusMsg = 'Guardando...';
+                                if (statusMsg === 'removing unused layers') statusMsg = 'Limpiando...';
+                                if (statusMsg === 'success') statusMsg = '¡Completado!';
+
+                                progressText.innerText = statusMsg;
+                                
+                                if (data.total && data.completed) {
+                                    const percent = Math.round((data.completed / data.total) * 100);
+                                    progressFill.style.width = percent + '%';
+                                    progressPercent.innerText = percent + '%';
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Error parsing chunk', e);
+                        }
+                    }
+                }
+
+                fetchModels();
+            } catch (err) {
+                alert('Error al descargar: ' + err);
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+                // Hide progress bar after 3 seconds on success
+                setTimeout(() => {
+                    if (progressText.innerText === '¡Completado!') {
+                        progressContainer.style.display = 'none';
+                    }
+                }, 3000);
+            }
+        }
+
+        function quickPull(name) {
+            document.getElementById('model-name').value = name;
+            pullModel();
+        }
+
+        async function deleteModel(name) {
+            if (!confirm('¿Eliminar ' + name + '?')) return;
+            try {
+                await fetch('/v1/models/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: name})
+                });
+                fetchModels();
+            } catch (err) {
+                alert('Error al eliminar');
+            }
+        }
+
+        // Initial load
+        fetchModels();
+    </script>
+</body>
+</html>

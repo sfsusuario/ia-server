@@ -101,14 +101,24 @@ def chat_completions():
             return app.response_class(generate(), mimetype='text/event-stream')
         else:
             result = response.json()
-            # Wrap in OpenAI format
+            # Log for debugging
+            print("Ollama Response:", json.dumps(result))
+            
+            if 'error' in result:
+                return jsonify({"error": result['error']}), 500
+
+            # Wrap in OpenAI format (handling both 'message' and 'response' fields)
+            bot_message = result.get("message")
+            if not bot_message and result.get("response"):
+                bot_message = {"role": "assistant", "content": result.get("response")}
+
             openai_response = {
                 "id": "chatcmpl-unique",
                 "object": "chat.completion",
                 "created": 1234567,
                 "model": result.get("model"),
                 "choices": [{
-                    "message": result.get("message"),
+                    "message": bot_message,
                     "finish_reason": "stop"
                 }]
             }

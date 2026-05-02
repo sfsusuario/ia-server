@@ -201,7 +201,8 @@
                     addMessageToChat('bot', botMessage);
                     chatHistory.push({role: 'assistant', content: botMessage});
                 } else {
-                    throw new Error('La IA respondió con un formato inesperado.');
+                    console.error("Raw response data:", data);
+                    throw new Error('La IA respondió con un formato inesperado: ' + JSON.stringify(data).substring(0, 100));
                 }
 
             } catch (err) {

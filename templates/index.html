@@ -11,7 +11,7 @@
     <header>
         <h1>IA SERVER</h1>
         <div id="connection-status">
-            <span class="status-badge">API Online (Python 2.7.17)</span>
+            <span class="status-badge" style="background: rgba(0, 242, 255, 0.1); color: var(--accent-color);">API Online (Python 3.14)</span>
         </div>
     </header>
 
@@ -169,7 +169,6 @@
             
             // Clear input and image
             input.value = '';
-            const tempImage = currentBase64Image;
             clearImage();
 
             // Add to history
@@ -189,18 +188,28 @@
                     })
                 });
 
+                if (!res.ok) {
+                    const errorData = await res.json().catch(() => ({}));
+                    throw new Error(errorData.error || `Error del servidor (${res.status})`);
+                }
+
                 const data = await res.json();
-                const botMessage = data.choices[0].message.content;
                 
-                document.getElementById(typingId).remove();
-                addMessageToChat('bot', botMessage);
-                
-                chatHistory.push({role: 'assistant', content: botMessage});
+                if (data.choices && data.choices[0] && data.choices[0].message) {
+                    const botMessage = data.choices[0].message.content;
+                    document.getElementById(typingId).remove();
+                    addMessageToChat('bot', botMessage);
+                    chatHistory.push({role: 'assistant', content: botMessage});
+                } else {
+                    throw new Error('La IA respondió con un formato inesperado.');
+                }
 
             } catch (err) {
-                console.error(err);
+                console.error('Chat Error:', err);
                 const typingDiv = document.getElementById(typingId);
-                if (typingDiv) typingDiv.innerHTML = 'Error al obtener respuesta de la IA.';
+                if (typingDiv) {
+                    typingDiv.innerHTML = `<span style="color: #ff4444;">⚠️ Error: ${err.message}</span>`;
+                }
             }
         }
 
